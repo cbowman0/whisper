@@ -68,7 +68,7 @@ if CAN_FALLOCATE:
   del libc
   del libc_name
 
-LOCK = False
+LOCK = True and CAN_LOCK
 CACHE_HEADERS = False
 AUTOFLUSH = False
 __headerCache = {}
