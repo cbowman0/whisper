@@ -14,6 +14,42 @@ try:
 except ImportError:
   raise SystemExit('[ERROR] Please make sure whisper is installed properly')
 
+class Approximator(object):
+  "Generates approximated value for arbitrary timestamp in time-series"
+  def __init__(self, series=[]):
+    self.datapoints = []
+    self.timestamps = []
+    self.values = []
+    for datapoints in series:
+      self.loadDatapoints(datapoints)
+
+  def loadDatapoints(self, datapoints):
+    self.datapoints.extend(filter( lambda x: x[1] is not None, datapoints))
+    self.datapoints.sort(cmp=lambda a,b: cmp(a[0], b[0]))
+    self.timestamps = [d[0] for d in self.datapoints]
+    self.values = [d[1] for d in self.datapoints]
+
+  def linearValue(self, timestamp, max_gap=None):
+    "Linear approximation based on two neighbor datapoints"
+    left_timestamp_id = bisect.bisect(self.timestamps, timestamp) - 1
+    if left_timestamp_id < 0 or left_timestamp_id >= len(self.timestamps):
+      return None
+    left_timestamp = self.timestamps[left_timestamp_id]
+    left_value = float(self.values[left_timestamp_id])
+    if left_timestamp == timestamp:
+      return left_value
+    right_timestamp_id = left_timestamp_id + 1
+    if right_timestamp_id >= len(self.timestamps):
+      return None
+    right_value = float(self.values[right_timestamp_id])
+    right_timestamp = self.timestamps[right_timestamp_id]
+    # Preserve gaps on a graph
+    if min((timestamp-left_timestamp),(right_timestamp-timestamp)) > max_gap:
+        return None
+    k = (right_value - left_value) / (right_timestamp - left_timestamp)
+    v = left_value + k * (timestamp - left_timestamp)
+    return v
+
 # Ignore SIGPIPE
 signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
@@ -50,6 +86,10 @@ option_parser.add_option(
     '--aggregate', action='store_true',
     help='Try to aggregate the values to fit the new archive better.'
          ' Note that this will make things slower and use more memory.')
+option_parser.add_option(
+    '--approximate', action='store_true',
+    help='If new interval is wider than original resulting time series will be sparse.'
+         ' This option fills in missing datapoints based on existing series approximation.')
 
 (options, args) = option_parser.parse_args()
 
@@ -155,6 +195,25 @@ if options.aggregate:
                                 whisper.aggregate(aggregationMethod,
                                                   non_none)])
     whisper.update_many(newfile, newdatapoints)
+elif options.approximate:
+  print 'Migrating data with approximation...'
+  approximator = Approximator()
+  for archive in old_archives:
+    timeinfo, values = archive['data']
+    datapoints = zip( range(*timeinfo), values )
+    approximator.loadDatapoints(datapoints)
+  new_info = whisper.info(newfile)
+  new_archives = new_info['archives']
+  for archive in new_archives:
+    step = archive['secondsPerPoint']
+    fromTime = now - archive['retention'] + now % step
+    untilTime = now + now % step + step
+    new_datapoints = []
+    for ts in xrange(fromTime, untilTime, step):
+      val = approximator.linearValue(ts, max_gap=step*2)
+      if val is not None:
+        new_datapoints.append((ts, val))
+    whisper.update_many(newfile, new_datapoints)
 else:
   print 'Migrating data without aggregation...'
   for archive in old_archives:
