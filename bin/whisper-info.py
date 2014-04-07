@@ -11,13 +11,17 @@ except ImportError:
   raise SystemExit('[ERROR] Please make sure whisper is installed properly')
 
 # Ignore SIGPIPE
-signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+try:
+  signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+except AttributeError:
+  #OS=windows
+  pass
 
 option_parser = optparse.OptionParser(usage='''%prog path [field]''')
 (options, args) = option_parser.parse_args()
 
 if len(args) < 1:
-  option_parser.print_usage()
+  option_parser.print_help()
   sys.exit(1)
 
 path = args[0]
